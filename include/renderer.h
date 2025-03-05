@@ -5,6 +5,7 @@
 #include <glad/glad.h>
 #include <SDL2/SDL_opengl.h>
 #include <stdexcept>
+#include "common.h"
 
 enum class RendererError {
     None = 0,
@@ -26,12 +27,16 @@ public:
     RendererError create_window(const char* title, int width, int height, bool fullscreen) noexcept;
     void swap_buffers() const noexcept;
 
+    void set_clear_color(vec4 color) noexcept;
+    void clear() const noexcept;
+
 private:
     RendererError initialize_opengl() noexcept;
 
 private:
     SDL_GLContext m_Context = nullptr;
     SDL_Window* m_Window = nullptr;
+    vec4 m_ClearColor = vec4{0.0f};
 };
 
 

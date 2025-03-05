@@ -89,3 +89,13 @@ RendererError Renderer::initialize_opengl() noexcept {
 void Renderer::swap_buffers() const noexcept {
     SDL_GL_SwapWindow(m_Window);
 }
+
+void Renderer::set_clear_color(vec4 color) noexcept {
+    m_ClearColor = color;
+    glClearColor(color.r, color.g, color.b, color.a);
+}
+
+void Renderer::clear() const noexcept {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+}
+

@@ -8,7 +8,8 @@ find_package(SDL2 REQUIRED)
 include_directories(Diggy PUBLIC ${SDL2_INCLUDE_DIRS} include ~/dev/glad/glad/include/)
 
 add_executable(Diggy main.cpp renderer.cpp ~/dev/glad/glad/src/glad.c
-    include/renderer.h)
+    include/renderer.h
+        include/common.h)
 
 
 target_link_directories(Diggy PUBLIC ${SDL2_LIBRARIES})
