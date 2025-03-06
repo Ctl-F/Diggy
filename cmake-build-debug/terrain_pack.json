@@ -1,0 +1,48 @@
+{
+    "texture_format": {
+        "size": { "width": 16, "height": 16},
+        "padding": { "x": 0, "y": 0 },
+        "format": 4
+    },
+    "blocks": [
+        [0, "air"],
+        [1, "grass"],
+        [2, "dirt"],
+        [3, "stone"],
+        [4, "bedrock"],
+        [5, "log"],
+        [6, "leaves"],
+        [7, "cobblestone"],
+        [8, "clay"],
+        [9, "brick"],
+        [10, "darkstone"],
+        [11, "coal-ore"],
+        [12, "iron-ore"],
+        [13, "copper-ore"],
+        [14, "gold-ore"],
+        [15, "diamond-ore"],
+        [16, "uranium-ore"],
+        [17, "lead-ore"],
+        [18, "mythril-ore"]
+    ],
+    "meta_data": [
+        { "id": 1, "hardness": 3 },
+        { "id": 2, "hardness": 3 },
+        { "id": 3, "hardness": 7 },
+        { "id": 4, "hardness": -1 },
+        { "id": 5, "hardness": 4 },
+        { "id": 6, "hardness": 1 },
+        { "id": 7, "hardness": 6 },
+        { "id": 8, "hardness": 4 },
+        { "id": 9, "hardness": 7 },
+        { "id": 10, "hardness": 12 },
+        { "id": 11, "hardness": 7 },
+        { "id": 12, "hardness": 8 },
+        { "id": 13, "hardness": 8 },
+        { "id": 14, "hardness": 9 },
+        { "id": 15, "hardness": 10 },
+        { "id": 16, "hardness": 11 },
+        { "id": 17, "hardness": 11 },
+        { "id": 18, "hardness": 20 }
+    ]
+}

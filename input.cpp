@@ -149,7 +149,11 @@ float get_move_axis_horizontal() noexcept {
     return s_InputContext.wasd[KEY_D] - s_InputContext.wasd[KEY_A];
 }
 vec2 get_move_axis_normalized() noexcept {
-    return glm::normalize(vec2{ get_move_axis_horizontal(), get_move_axis_vertical() });
+    vec2 axis{get_move_axis_horizontal(), get_move_axis_vertical()};
+    if (glm::dot(axis, axis) <= std::numeric_limits<float>::epsilon()) {
+        return vec2{0.0f};
+    }
+    return glm::normalize(axis);
 }
 
 float get_cam_axis_vertical() noexcept {

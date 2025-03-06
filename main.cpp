@@ -3,11 +3,19 @@
 #include "util.h"
 #include "input.h"
 
+
 size_t load_shader(Renderer& renderer, const char* vertex_file, const char* fragment_file) noexcept;
+
+void game_step(float delta_time) noexcept;
+void game_render(Renderer& renderer, float delta_time) noexcept;
 
 void update_player(float delta_time) noexcept;
 
 static DiggyContext Context{ true };
+
+size_t shader_id;
+size_t mesh_id;
+size_t texture_id;
 
 int main() {
     Renderer renderer{};
@@ -21,10 +29,12 @@ int main() {
     Context.projection = glm::perspective(glm::radians(100.0f), 1280.0f / 720.0f, 0.01f, 1000.0f);
     Context.view = glm::lookAt(vec3{0.0f, 10.0f, 0.0f}, vec3{0.0f, 10.0f, 100.0f}, {0.0f, 1.0f, 0.0f});
 
-    size_t shader_id = load_shader(renderer, "vertex.glsl", "fragment.glsl");
+    shader_id = load_shader(renderer, "vertex.glsl", "fragment.glsl");
     if (shader_id == -1) {
         return 1;
     }
+
+    texture_id = renderer.upload_texture("texture_pack.png", true);
 
     MeshBuffer quad;
     {
@@ -43,7 +53,7 @@ int main() {
                          {0.0, 1.0, 0.0});
     }
 
-    size_t mesh_id = renderer.upload_mesh(quad);
+    mesh_id = renderer.upload_mesh(quad);
 
     capture_mouse();
 
@@ -57,34 +67,10 @@ int main() {
         float delta_time = 1.0f / glm::max(static_cast<float>(delta), 0.1f);
 
         handle_events(Context);
-
-        Context.camera_direction.x -= get_cam_axis_horizontal() * delta_time * 1.0f;
-        Context.camera_direction.y += get_cam_axis_vertical() * delta_time * 1.0f;
-        Context.camera_direction.y = glm::clamp(Context.camera_direction.y, glm::radians(-85.0f), glm::radians(85.0f));
-
-        vec3 forward{
-            glm::cos(Context.camera_direction.y) * glm::sin(Context.camera_direction.x),
-            -glm::sin(Context.camera_direction.y),
-            glm::cos(Context.camera_direction.y) * glm::cos(Context.camera_direction.x)
-        };
-
-        Context.view = glm::lookAt({0.0f, 10.0f, 0.0f},
-            100.0f * forward,
-            {0.0f, 1.0f, 0.0f});
-
-        if (button_is_just_pressed(ActionButton::Menu)) {
-            Context.running = false;
-        }
+        game_step(delta_time);
 
         renderer.clear();
-
-        renderer.use_shader(shader_id);
-        renderer.set_uniform("u_Projection", Context.projection);
-        renderer.set_uniform("u_View", Context.view);
-        renderer.set_uniform("u_Model", Context.model);
-
-        renderer.render_mesh(mesh_id);
-
+        game_render(renderer, delta_time);
         renderer.swap_buffers();
     }
 
@@ -94,8 +80,63 @@ int main() {
 }
 
 void update_player(float delta_time) noexcept {
+    float sensitivity = 1.0f;
+    float smoothFactor = 10.0f;
 
+    Context.player.yaw -= get_cam_axis_horizontal() * sensitivity * delta_time;
+    Context.player.pitch -= get_cam_axis_vertical() * sensitivity * delta_time;
+
+    const float angle_limit = glm::radians(85.0f);
+    Context.player.pitch = glm::clamp(Context.player.pitch, -angle_limit, angle_limit);
+
+    glm::quat targetPitch = glm::angleAxis(Context.player.pitch, glm::vec3(1.0f, 0.0f, 0.0f));
+    glm::quat targetYaw = glm::angleAxis(Context.player.yaw, glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::quat targetOrientation = glm::normalize(targetYaw * targetPitch);
+
+    Context.player.orientation = glm::slerp(Context.player.orientation, targetOrientation, 1.0f - glm::exp(-smoothFactor * delta_time));
+    glm::vec3 forward = Context.player.orientation * glm::vec3(0.0f, 0.0f, -1.0f);
+    glm::vec3 right = Context.player.orientation * glm::vec3(1.0f, 0.0f, 0.0f);
+
+    float temp_y = forward.y;
+    forward.y = 0.0f;
+    right.y = 0.0f;
+
+    forward = glm::normalize(forward);
+    right = glm::normalize(right);
+
+    vec2 move_axis = get_move_axis_normalized();
+
+    glm::vec3 velocity = (-forward * move_axis.y + right * move_axis.x) * Context.player_speed * delta_time;
+
+    Context.player.position += velocity;
+
+    forward.y = temp_y;
+
+    Context.view = glm::lookAt(Context.player.position + Context.player.height,
+        Context.player.position + Context.player.height + forward, glm::vec3(0.0f, 1.0f, 0.0f));
 }
+
+void game_step(float delta_time) noexcept {
+    if (button_is_just_pressed(ActionButton::Menu)) {
+        Context.running = false;
+    }
+
+    update_player(delta_time);
+}
+
+void game_render(Renderer &renderer, float delta_time) noexcept {
+    renderer.use_shader(shader_id);
+
+    renderer.set_sampler("texture_atlas", 0, texture_id);
+
+    renderer.set_uniform("u_Projection", Context.projection);
+    renderer.set_uniform("u_View", Context.view);
+    renderer.set_uniform("u_Model", Context.model);
+
+    renderer.render_mesh(mesh_id);
+}
+
+
 
 size_t load_shader(Renderer& renderer, const char* vertex_file, const char* fragment_file) noexcept {
     auto vSrc = util::read_file(vertex_file);

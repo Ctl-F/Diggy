@@ -1,6 +1,7 @@
 #include "renderer.h"
 
 #include <glm/gtc/type_ptr.hpp>
+#include "stb_image.h"
 
 Renderer::Renderer() {
     if(SDL_Init(SDL_INIT_VIDEO) < 0){
@@ -332,3 +333,49 @@ void Renderer::set_uniform(const std::string_view name, const mat4 &value) {
 
     glUniformMatrix4fv(loc, 1, GL_FALSE, glm::value_ptr(value));
 }
+
+size_t Renderer::upload_texture(const char *file, bool v_flip) noexcept {
+    Texture& texture = m_Textures.emplace_back();
+    stbi_set_flip_vertically_on_load(v_flip);
+    unsigned char* data = stbi_load(file, &texture.width, &texture.height, &texture.channels, 0);
+
+    if (!data) {
+        m_Textures.pop_back();
+        return -1;
+    }
+
+    glGenTextures(1, &texture.id);
+    glBindTexture(GL_TEXTURE_2D, texture.id);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    auto fmt = GL_RGB;
+    if (texture.channels == 4) {
+        fmt = GL_RGBA;
+    }
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texture.width, texture.height, 0, fmt, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    stbi_image_free(data);
+
+    return m_Textures.size() - 1;
+}
+
+void Renderer::set_sampler(const std::string_view name, int slot, size_t texture_id) {
+    if (texture_id == -1) {
+        return;
+    }
+
+    uint32_t loc;
+    if (loc=get_loc(name); loc == -1) {
+        return;
+    }
+    glUniform1i(loc, slot);
+
+    glActiveTexture(GL_TEXTURE0 + slot);
+    glBindTexture(GL_TEXTURE_2D, m_Textures[texture_id].id);
+}
+

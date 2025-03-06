@@ -8,17 +8,29 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
 #include <cstdint>
 
 typedef glm::vec4 vec4;
 typedef glm::vec3 vec3;
 typedef glm::vec2 vec2;
 typedef glm::mat4 mat4;
+typedef glm::quat quat;
+
+struct Camera {
+    vec3 position{0.0f};
+    quat orientation{1.0f, 0.0f, 0.0f, 0.0f};
+    float pitch{0.0f};
+    float yaw{0.0f};
+    vec3 height{0.0f, 10.0f, 0.0f};
+};
 
 struct DiggyContext {
     bool running;
 
-    vec2 camera_direction;
+    Camera player{};
+
+    float player_speed = 10.0f;
 
     mat4 projection{1.0f};
     mat4 view{1.0f};

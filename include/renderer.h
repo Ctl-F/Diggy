@@ -52,6 +52,13 @@ private:
     std::unordered_map<std::string, uint32_t> uniform_cache;
 };
 
+struct Texture {
+    uint32_t id;
+    int32_t width;
+    int32_t height;
+    int32_t channels;
+};
+
 class MeshBuilder {
 public:
     MeshBuilder(MeshBuffer& target);
@@ -86,6 +93,8 @@ public:
     Renderer& operator=(const Renderer&) = delete;
     Renderer& operator=(Renderer&&) noexcept;
 
+    size_t upload_texture(const char* file, bool v_flip) noexcept;
+
     RendererError create_window(const char* title, int width, int height, bool fullscreen) noexcept;
     void swap_buffers() const noexcept;
 
@@ -102,6 +111,7 @@ public:
     void set_uniform(const std::string_view name, vec3 value);
     void set_uniform(const std::string_view name, vec4 value);
     void set_uniform(const std::string_view name, const mat4& value);
+    void set_sampler(const std::string_view name, int slot, size_t texture_id);
 
 private:
     RendererError initialize_opengl() noexcept;
@@ -116,7 +126,7 @@ private:
 
     std::vector<Mesh> m_Meshes;
     std::vector<Shader> m_Shaders;
-
+    std::vector<Texture> m_Textures;
 };
 
 

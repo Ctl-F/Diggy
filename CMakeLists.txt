@@ -13,7 +13,12 @@ add_executable(Diggy main.cpp renderer.cpp ~/dev/glad/glad/src/glad.c
         include/util.h
         util.cpp
         include/input.h
-        input.cpp)
+        input.cpp
+        include/terrain.h
+        terrain.cpp
+        include/stb_image.h
+        stb_image.cpp
+        include/json.h)
 
 
 target_link_directories(Diggy PUBLIC ${SDL2_LIBRARIES})
