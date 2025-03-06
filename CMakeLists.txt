@@ -9,7 +9,11 @@ include_directories(Diggy PUBLIC ${SDL2_INCLUDE_DIRS} include ~/dev/glad/glad/in
 
 add_executable(Diggy main.cpp renderer.cpp ~/dev/glad/glad/src/glad.c
     include/renderer.h
-        include/common.h)
+        include/common.h
+        include/util.h
+        util.cpp
+        include/input.h
+        input.cpp)
 
 
 target_link_directories(Diggy PUBLIC ${SDL2_LIBRARIES})
