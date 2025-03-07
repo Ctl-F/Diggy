@@ -125,9 +125,9 @@ void handle_events(DiggyContext &context) {
             case SDL_KEYUP:
                 handle_key_up(event);
                 break;
-            case SDL_MOUSEMOTION:
+            /*case SDL_MOUSEMOTION:
                 handle_mouse_motion(event);
-                break;
+                break;*/
             case SDL_MOUSEBUTTONUP:
                 handle_mouse_button_up(event);
                 break;
@@ -140,6 +140,10 @@ void handle_events(DiggyContext &context) {
             default: break;
         }
     }
+
+    int mouse_x, mouse_y;
+    SDL_GetRelativeMouseState(&mouse_x, &mouse_y);
+    s_InputContext.camera_delta = { (float)mouse_x, (float)mouse_y };
 }
 
 float get_move_axis_vertical() noexcept {

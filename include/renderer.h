@@ -4,11 +4,13 @@
 #include <SDL2/SDL.h>
 #include <glad/glad.h>
 #include <SDL2/SDL_opengl.h>
+#include <SDL_ttf.h>
 #include <stdexcept>
 #include "common.h"
 #include <vector>
 #include <unordered_map>
 #include <string_view>
+#include "stack.h"
 
 enum class RendererError {
     None = 0,
@@ -83,6 +85,12 @@ private:
     uint32_t m_VertexCount = 0;
 };
 
+struct RendererStringResult {
+    bool ok;
+    size_t mesh_id;
+    size_t texture_id;
+};
+
 class Renderer {
 public:
     Renderer();
@@ -101,22 +109,60 @@ public:
     void set_clear_color(vec4 color) noexcept;
     void clear() const noexcept;
 
+    RendererError create_text_shader(const char* vertex_source, const char* fragment_source) noexcept;
+
     size_t upload_mesh(const MeshBuffer& buffer) noexcept;
     RendererError upload_shader(const char* vertex_source, const char* fragment_source, size_t& shader_id) noexcept;
+    size_t upload_font(const char* filename, int size) noexcept;
+
+    void delete_mesh(size_t index) noexcept;
+    void delete_shader(size_t index) noexcept;
+    void delete_texture(size_t index) noexcept;
 
     void use_shader(size_t shader_id) noexcept;
     void render_mesh(size_t mesh_id) noexcept;
+
+    void render_text(size_t font_id, const char* text, int x, int y, vec3 color) noexcept;
+
+    void batch_render_text_begin(size_t font_id) noexcept;
+    void batch_render_text(const char* text, int x, int y, vec3 color) noexcept;
+    void batch_render_text_end() noexcept;
 
     void set_uniform(const std::string_view name, vec2 value);
     void set_uniform(const std::string_view name, vec3 value);
     void set_uniform(const std::string_view name, vec4 value);
     void set_uniform(const std::string_view name, const mat4& value);
+    void set_uniform(const std::string_view name, int value);
     void set_sampler(const std::string_view name, int slot, size_t texture_id);
 
+    bool mesh_is_dead(size_t index) const;
+    bool shader_is_dead(size_t index) const;
+    bool texture_is_dead(size_t index) const;
 private:
     RendererError initialize_opengl() noexcept;
 
     uint32_t get_loc(const std::string_view name) noexcept;
+
+    size_t create_virtual_font(size_t font_id, int atlasWidth, int atlasHeight);
+    int estimate_atlas_size(size_t font_id, int padding = 2) const noexcept;
+
+    RendererError compile_shader(const char* vertex_source, const char* fragment_source, Shader& out) noexcept;
+
+private:
+    struct Glyph {
+        vec2 uv0, uv1;
+        int size_x, size_y;
+        int advance;
+        int bearing_x, bearing_y;
+    };
+
+    struct Font {
+        size_t texture_id;
+        std::unordered_map<char, Glyph> glyphs;
+        int atlasWidth, atlasHeight;
+        size_t true_font_id;
+        Mesh text_mesh;
+    };
 
 private:
     SDL_GLContext m_Context = nullptr;
@@ -124,9 +170,23 @@ private:
     vec4 m_ClearColor = vec4{0.0f};
     Shader* m_CurrentShader = nullptr;
 
+    std::vector<float> m_BatchTextVertices{600};
+    size_t m_BatchFontID = -1;
+
+    mat4 m_GuiProjection{1.0f};
+
+    Shader m_FontShader;
+
     std::vector<Mesh> m_Meshes;
     std::vector<Shader> m_Shaders;
     std::vector<Texture> m_Textures;
+
+    std::vector<TTF_Font*> m_Fonts;
+    std::vector<Font> m_VirtualFonts;
+
+    stack<size_t> m_DeadMeshes;
+    stack<size_t> m_DeadShaders;
+    stack<size_t> m_DeadTextures;
 };
 
 

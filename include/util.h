@@ -14,6 +14,15 @@ namespace util {
     size_t get_file_size(const char* filename) noexcept;
     std::optional<std::string> read_file(const char* filename) noexcept;
 
+    template<typename type_t>
+    bool contains(const type_t* begin, const type_t* end, const type_t& value) noexcept {
+        while (begin < end) {
+            if (value == *begin) return true;
+            ++begin;
+        }
+        return false;
+    }
+
 }
 
 

@@ -10,6 +10,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <cstdint>
+#include <cstdio>
 
 typedef glm::vec4 vec4;
 typedef glm::vec3 vec3;
@@ -30,11 +31,17 @@ struct DiggyContext {
 
     Camera player{};
 
-    float player_speed = 10.0f;
+    float player_speed = 50.0f;
 
     mat4 projection{1.0f};
     mat4 view{1.0f};
     mat4 model{1.0f};
 };
+
+#ifndef EXCLUDE_LOGGING
+#define LOG(a, ...) fprintf(stderr, "%s:%d - %s\n", __FILE__, __LINE__, a)
+#else
+#define LOG(a, ...)
+#endif
 
 #endif //COMMON_H

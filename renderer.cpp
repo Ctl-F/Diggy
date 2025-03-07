@@ -2,16 +2,21 @@
 
 #include <glm/gtc/type_ptr.hpp>
 #include "stb_image.h"
+#include "util.h"
 
 Renderer::Renderer() {
     if(SDL_Init(SDL_INIT_VIDEO) < 0){
         throw std::runtime_error("Unable to initialize SDL");
     }
+    if (TTF_Init() < 0) {
+        throw std::runtime_error("Unable to initialize TTF");
+    }
+
+    SDL_GL_SetSwapInterval(0);
 }
 Renderer::Renderer(Renderer&& other) noexcept {
     m_Context = other.m_Context;
     m_Window = other.m_Window;
-
 
     other.m_Context = nullptr;
     other.m_Window = nullptr;
@@ -25,6 +30,7 @@ Renderer::~Renderer(){
         m_Context = nullptr;
         m_Window = nullptr;
 
+        TTF_Quit();
         SDL_Quit();
     }
 }
@@ -70,6 +76,8 @@ RendererError Renderer::create_window(const char* title, int width, int height, 
 
     glViewport(0, 0, width, height);
 
+    m_GuiProjection = glm::ortho(0.0f, (float)width, (float)height, 0.0f);
+
     return RendererError::None;
 }
 
@@ -103,7 +111,17 @@ void Renderer::clear() const noexcept {
 }
 
 size_t Renderer::upload_mesh(const MeshBuffer& buffer) noexcept {
-    Mesh& mesh = m_Meshes.emplace_back(0);
+    Mesh* mesh_ptr;
+
+    if (m_DeadMeshes.empty()) {
+        mesh_ptr = &m_Meshes.emplace_back();
+    }
+    else {
+        mesh_ptr = &m_Meshes[m_DeadMeshes.top()];
+        m_DeadMeshes.pop();
+    }
+
+    Mesh& mesh = *mesh_ptr;
 
     glGenVertexArrays(1, &mesh.array_buffer_id);
     glBindVertexArray(mesh.array_buffer_id);
@@ -195,11 +213,38 @@ void MeshBuilder::add_quad(vec3 position0, vec3 position1, vec3 position2, vec3 
     add_index(m_VertexCount-1);
 }
 
+RendererError Renderer::create_text_shader(const char *vertex_source, const char *fragment_source) noexcept {
+    if (RendererError err=compile_shader(vertex_source, fragment_source, m_FontShader); err != RendererError::None) {
+        return err;
+    }
+
+    return RendererError::None;
+}
+
+
 RendererError Renderer::upload_shader(const char *vertex_source, const char *fragment_source, size_t &shader_id) noexcept {
+    Shader shader;
+    if (RendererError err=compile_shader(vertex_source, fragment_source, shader); err != RendererError::None) {
+        return err;
+    }
+
+    if (m_DeadShaders.empty()) {
+        shader_id = m_Shaders.size();
+        m_Shaders.push_back(shader);
+    }
+    else {
+        shader_id = m_DeadShaders.top();
+        m_DeadShaders.pop();
+        m_Shaders[shader_id] = shader;
+    }
+    return RendererError::None;
+}
+
+
+RendererError Renderer::compile_shader(const char* vertex_source, const char* fragment_source, Shader& out) noexcept {
     uint32_t vert, frag;
     int success;
     char infoLog[512]{0};
-
 
     vert = glCreateShader(GL_VERTEX_SHADER);
     frag = glCreateShader(GL_FRAGMENT_SHADER);
@@ -253,10 +298,7 @@ RendererError Renderer::upload_shader(const char *vertex_source, const char *fra
         return RendererError::ShaderLinkerError;
     }
 
-    shader_id = m_Shaders.size();
-    Shader& shader = m_Shaders.emplace_back();
-
-    shader.program_id = prog_id;
+    out.program_id = prog_id;
     return RendererError::None;
 }
 
@@ -324,6 +366,13 @@ void Renderer::set_uniform(const std::string_view name, vec4 value) {
     glUniform4f(loc, value.x, value.y, value.z, value.w);
 }
 
+void Renderer::set_uniform(const std::string_view name, int value) {
+    uint32_t loc;
+    if (loc=get_loc(name); loc == -1) {
+        return;
+    }
+    glUniform1i(loc, value);
+}
 
 void Renderer::set_uniform(const std::string_view name, const mat4 &value) {
     uint32_t loc;
@@ -335,7 +384,20 @@ void Renderer::set_uniform(const std::string_view name, const mat4 &value) {
 }
 
 size_t Renderer::upload_texture(const char *file, bool v_flip) noexcept {
-    Texture& texture = m_Textures.emplace_back();
+    Texture* texture_ptr;
+    size_t texture_id;
+    if (m_DeadTextures.empty()) {
+        texture_id = m_Textures.size();
+        texture_ptr = &m_Textures.emplace_back();
+    }
+    else {
+        texture_id = m_DeadTextures.top();
+        texture_ptr = &m_Textures[texture_id];
+        m_DeadTextures.pop();
+    }
+
+
+    Texture& texture = *texture_ptr;
     stbi_set_flip_vertically_on_load(v_flip);
     unsigned char* data = stbi_load(file, &texture.width, &texture.height, &texture.channels, 0);
 
@@ -379,3 +441,329 @@ void Renderer::set_sampler(const std::string_view name, int slot, size_t texture
     glBindTexture(GL_TEXTURE_2D, m_Textures[texture_id].id);
 }
 
+size_t Renderer::upload_font(const char *filename, int size) noexcept {
+    size_t font_id = m_Fonts.size();
+    TTF_Font*& font = m_Fonts.emplace_back();
+
+    font = TTF_OpenFont(filename, size);
+    if (!font) {
+        fprintf(stderr, "TTF_Font Error: %s\n", TTF_GetError());
+        m_Fonts.pop_back();
+        return -1;
+    }
+
+    const int atlas_size = estimate_atlas_size(font_id);
+    size_t vfont_id = create_virtual_font(font_id, atlas_size, atlas_size);
+    return vfont_id;
+}
+
+void Renderer::batch_render_text_begin(size_t font_id) noexcept {
+    m_BatchTextVertices.clear();
+    m_BatchFontID = font_id;
+}
+
+void Renderer::batch_render_text(const char* text, int x, int y, vec3 color) noexcept {
+    if (m_BatchFontID == -1) {
+        fprintf(stderr, "Batch text not started.\n");
+        return;
+    }
+
+    Font& font = m_VirtualFonts[m_BatchFontID];
+    float startX = static_cast<float>(x);
+    while (*text) {
+        char c = *text; text++;
+        if (c == '\n') {
+            x = static_cast<int>(startX);
+            y += font.glyphs['|'].size_y;
+            continue;
+        }
+
+        Glyph& glyph = font.glyphs[c];
+
+        float x0 = x + glyph.bearing_x;
+        float y0 = y + glyph.bearing_y;
+        float x1 = x0 + glyph.size_x;
+        float y1 = y0 + glyph.size_y;
+
+        m_BatchTextVertices.push_back(x0); m_BatchTextVertices.push_back(y0); m_BatchTextVertices.push_back(glyph.uv0.x); m_BatchTextVertices.push_back(glyph.uv0.y);
+        m_BatchTextVertices.push_back(color.r); m_BatchTextVertices.push_back(color.g); m_BatchTextVertices.push_back(color.b);
+        m_BatchTextVertices.push_back(x1); m_BatchTextVertices.push_back(y0); m_BatchTextVertices.push_back(glyph.uv1.x); m_BatchTextVertices.push_back(glyph.uv0.y);
+        m_BatchTextVertices.push_back(color.r); m_BatchTextVertices.push_back(color.g); m_BatchTextVertices.push_back(color.b);
+        m_BatchTextVertices.push_back(x1); m_BatchTextVertices.push_back(y1); m_BatchTextVertices.push_back(glyph.uv1.x); m_BatchTextVertices.push_back(glyph.uv1.y);
+        m_BatchTextVertices.push_back(color.r); m_BatchTextVertices.push_back(color.g); m_BatchTextVertices.push_back(color.b);
+
+        m_BatchTextVertices.push_back(x0); m_BatchTextVertices.push_back(y0); m_BatchTextVertices.push_back(glyph.uv0.x); m_BatchTextVertices.push_back(glyph.uv0.y);
+        m_BatchTextVertices.push_back(color.r); m_BatchTextVertices.push_back(color.g); m_BatchTextVertices.push_back(color.b);
+        m_BatchTextVertices.push_back(x1); m_BatchTextVertices.push_back(y1); m_BatchTextVertices.push_back(glyph.uv1.x); m_BatchTextVertices.push_back(glyph.uv1.y);
+        m_BatchTextVertices.push_back(color.r); m_BatchTextVertices.push_back(color.g); m_BatchTextVertices.push_back(color.b);
+        m_BatchTextVertices.push_back(x0); m_BatchTextVertices.push_back(y1); m_BatchTextVertices.push_back(glyph.uv0.x); m_BatchTextVertices.push_back(glyph.uv1.y);
+        m_BatchTextVertices.push_back(color.r); m_BatchTextVertices.push_back(color.g); m_BatchTextVertices.push_back(color.b);
+
+        x += glyph.advance;
+    }
+}
+
+void Renderer::batch_render_text_end() noexcept {
+    constexpr size_t FLOATS_PER_VERTEX = 2 + 2 + 3;
+    constexpr size_t VERTEX_STRIDE = FLOATS_PER_VERTEX * sizeof(float);
+    constexpr size_t OFFSET_OF_POS = 0;
+    constexpr size_t OFFSET_OF_UV  = 2 * sizeof(float);
+    constexpr size_t OFFSET_OF_COL = 4 * sizeof(float);
+
+    if (m_BatchFontID == -1) {
+        fprintf(stderr, "Batch text render not started\n");
+        return;
+    }
+    Font& font = m_VirtualFonts[m_BatchFontID];
+
+    if (font.text_mesh.array_buffer_id == 0) {
+        glGenVertexArrays(1, &font.text_mesh.array_buffer_id);
+        glGenBuffers(1, font.text_mesh.buffers);
+    }
+    glBindVertexArray(font.text_mesh.array_buffer_id);
+    glBindBuffer(GL_ARRAY_BUFFER, font.text_mesh.buffers[0]);
+
+    glBufferData(GL_ARRAY_BUFFER, m_BatchTextVertices.size() * sizeof(float), m_BatchTextVertices.data(), GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, VERTEX_STRIDE, (void*)OFFSET_OF_POS);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, VERTEX_STRIDE, (void*)OFFSET_OF_UV);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, VERTEX_STRIDE, (void*)OFFSET_OF_COL);
+
+    glUseProgram(m_FontShader.program_id);
+
+    Shader* shader = m_CurrentShader;
+    m_CurrentShader = &m_FontShader;
+
+    set_uniform("u_Projection", m_GuiProjection);
+    set_uniform("u_FontAtlas", 0);
+
+    m_CurrentShader = shader;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_Textures[font.texture_id].id);
+    glDrawArrays(GL_TRIANGLES, 0, m_BatchTextVertices.size());
+
+    glBindVertexArray(0);
+}
+
+void Renderer::render_text(size_t font_id, const char* text, int x, int y, vec3 color) noexcept {
+    constexpr size_t VERTICES_PER_QUAD = 6;
+    constexpr size_t DEFAULT_QUAD_COUNT = 50;
+
+    constexpr size_t FLOATS_PER_VERTEX = 2 + 2 + 3;
+    constexpr size_t VERTEX_STRIDE = FLOATS_PER_VERTEX * sizeof(float);
+    constexpr size_t OFFSET_OF_POS = 0;
+    constexpr size_t OFFSET_OF_UV  = 2 * sizeof(float);
+    constexpr size_t OFFSET_OF_COL = 4 * sizeof(float);
+
+    static bool has_init = false;
+    static std::vector<float> vertices{};
+    if (!has_init) {
+        vertices.reserve(VERTICES_PER_QUAD * DEFAULT_QUAD_COUNT);
+        has_init = true;
+    }
+    vertices.clear();
+
+    Font& font = m_VirtualFonts[font_id];
+
+    float startX = static_cast<float>(x);
+    while (*text) {
+        char c = *text; text++;
+        if (c == '\n') {
+            x = static_cast<int>(startX);
+            y += font.glyphs['|'].size_y;
+            continue;
+        }
+
+        Glyph& glyph = font.glyphs[c];
+
+        float x0 = x + glyph.bearing_x;
+        float y0 = y + glyph.bearing_y;
+        float x1 = x0 + glyph.size_x;
+        float y1 = y0 + glyph.size_y;
+
+        vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(glyph.uv0.x); vertices.push_back(glyph.uv0.y);
+            vertices.push_back(color.r); vertices.push_back(color.g); vertices.push_back(color.b);
+        vertices.push_back(x1); vertices.push_back(y0); vertices.push_back(glyph.uv1.x); vertices.push_back(glyph.uv0.y);
+            vertices.push_back(color.r); vertices.push_back(color.g); vertices.push_back(color.b);
+        vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(glyph.uv1.x); vertices.push_back(glyph.uv1.y);
+            vertices.push_back(color.r); vertices.push_back(color.g); vertices.push_back(color.b);
+
+        vertices.push_back(x0); vertices.push_back(y0); vertices.push_back(glyph.uv0.x); vertices.push_back(glyph.uv0.y);
+            vertices.push_back(color.r); vertices.push_back(color.g); vertices.push_back(color.b);
+        vertices.push_back(x1); vertices.push_back(y1); vertices.push_back(glyph.uv1.x); vertices.push_back(glyph.uv1.y);
+            vertices.push_back(color.r); vertices.push_back(color.g); vertices.push_back(color.b);
+        vertices.push_back(x0); vertices.push_back(y1); vertices.push_back(glyph.uv0.x); vertices.push_back(glyph.uv1.y);
+            vertices.push_back(color.r); vertices.push_back(color.g); vertices.push_back(color.b);
+
+        x += glyph.advance;
+    }
+
+    if (font.text_mesh.array_buffer_id == 0) {
+        glGenVertexArrays(1, &font.text_mesh.array_buffer_id);
+        glGenBuffers(1, font.text_mesh.buffers);
+    }
+    glBindVertexArray(font.text_mesh.array_buffer_id);
+    glBindBuffer(GL_ARRAY_BUFFER, font.text_mesh.buffers[0]);
+
+    glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(float), vertices.data(), GL_DYNAMIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, VERTEX_STRIDE, (void*)OFFSET_OF_POS);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, VERTEX_STRIDE, (void*)OFFSET_OF_UV);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, VERTEX_STRIDE, (void*)OFFSET_OF_COL);
+
+    glUseProgram(m_FontShader.program_id);
+
+    Shader* shader = m_CurrentShader;
+    m_CurrentShader = &m_FontShader;
+
+    set_uniform("u_Projection", m_GuiProjection);
+    set_uniform("u_FontAtlas", 0);
+
+    m_CurrentShader = shader;
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_Textures[font.texture_id].id);
+    glDrawArrays(GL_TRIANGLES, 0, vertices.size());
+
+    glBindVertexArray(0);
+}
+
+bool Renderer::mesh_is_dead(size_t index) const {
+    return util::contains<size_t>(m_DeadMeshes.cbegin(), m_DeadMeshes.cend(), index);
+}
+bool Renderer::shader_is_dead(size_t index) const {
+    return util::contains<size_t>(m_DeadShaders.cbegin(), m_DeadShaders.cend(), index);
+}
+bool Renderer::texture_is_dead(size_t index) const {
+    return util::contains<size_t>(m_DeadTextures.cbegin(), m_DeadTextures.cend(), index);
+}
+
+
+void Renderer::delete_mesh(size_t index) noexcept {
+    if (index >= m_Meshes.size() || mesh_is_dead(index)) {
+        return;
+    }
+    Mesh& m = m_Meshes[index];
+    glDeleteVertexArrays(1, &m.array_buffer_id);
+    glDeleteBuffers(2, m.buffers);
+
+    m.array_buffer_id = 0;
+    m.buffers[0] = 0;
+    m.buffers[1] = 0;
+
+    m_DeadMeshes.push(index);
+
+}
+void Renderer::delete_shader(size_t index) noexcept {
+    if (index >= m_Shaders.size() || shader_is_dead(index)) {
+        return;
+    }
+    Shader& s = m_Shaders[index];
+    s.uniform_cache.clear();
+    glDeleteProgram(s.program_id);
+    s.program_id = 0;
+
+    m_DeadShaders.push(index);
+}
+void Renderer::delete_texture(size_t index) noexcept {
+    if (index >= m_Textures.size() || texture_is_dead(index)) {
+        return;
+    }
+    Texture& tex = m_Textures[index];
+    glDeleteTextures(1, &tex.id);
+
+    tex.id = 0;
+    tex.width = 0;
+    tex.height = 0;
+    tex.channels = 0;
+
+    m_DeadTextures.push(index);
+}
+
+
+int Renderer::estimate_atlas_size(size_t font_id, int padding) const noexcept{
+    TTF_Font* font = m_Fonts.at(font_id);
+    int width = 0, height = 0;
+    int row_height = 0;
+    int max_width = 0;
+    int area = 0;
+
+    for (char c = 32; c < 127; ++c) {
+        int w, h;
+        if (TTF_SizeText(font, std::string(1, c).c_str(), &w, &h) == 0) {
+            width += w + padding;
+            row_height = std::max(row_height, h);
+            max_width = std::max(max_width, w);
+            area += (w + padding) * h;
+        }
+    }
+    int est_size = std::max((int)std::sqrt(area) * 2, 64);
+
+    int size = 64;
+    while (size < est_size) {
+        size *= 2;
+    }
+    return size;
+}
+
+size_t Renderer::create_virtual_font(size_t font_id, int atlasWidth, int atlasHeight) {
+    size_t vfont_id = m_VirtualFonts.size();
+    Font& font = m_VirtualFonts.emplace_back();
+    TTF_Font* ttf_font = m_Fonts.at(font_id);
+
+    font.true_font_id = font_id;
+
+    font.atlasWidth = atlasWidth;
+    font.atlasHeight = atlasHeight;
+
+    SDL_Surface* surf = SDL_CreateRGBSurface(0, atlasWidth, atlasHeight, 32,
+        0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
+    SDL_FillRect(surf, NULL, 0);
+
+    int x = 0, y = 0, maxRowHeight = 0;
+    for (char c = 32; c < 127; ++c) {
+        SDL_Surface* glyphSurf = TTF_RenderGlyph_Blended(ttf_font, c, {255, 255, 255, 255});
+        if (!glyphSurf) continue;
+
+        if (x + glyphSurf->w >= atlasWidth) {
+            x = 0;
+            y += maxRowHeight;
+            maxRowHeight = 0;
+        }
+
+        SDL_Rect dstRect{x, y, glyphSurf->w, glyphSurf->h};
+        SDL_BlitSurface(glyphSurf, NULL, surf, &dstRect);
+
+        Glyph glyph;
+        glyph.uv0 = { x / (float)atlasWidth, y / (float)atlasHeight };
+        glyph.uv1 = { (x + glyphSurf->w) / (float)atlasWidth, (y + glyphSurf->h) / (float)atlasHeight };
+        glyph.size_x = glyphSurf->w;
+        glyph.size_y = glyphSurf->h;
+        TTF_GlyphMetrics(ttf_font, c, &glyph.bearing_x, NULL, &glyph.bearing_y, NULL, &glyph.advance);
+
+        font.glyphs[c] = glyph;
+        x += glyphSurf->w + 2;
+        maxRowHeight = std::max(maxRowHeight, glyphSurf->h);
+
+        SDL_FreeSurface(glyphSurf);
+    }
+
+    font.texture_id = m_Textures.size(); // todo: check for dead_texture slots
+    Texture& texture = m_Textures.emplace_back();
+    glGenTextures(1, &texture.id);
+    glBindTexture(GL_TEXTURE_2D, texture.id);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, atlasWidth, atlasHeight, 0, GL_BGRA, GL_UNSIGNED_BYTE, surf->pixels);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+    SDL_FreeSurface(surf);
+
+    return vfont_id;
+}
